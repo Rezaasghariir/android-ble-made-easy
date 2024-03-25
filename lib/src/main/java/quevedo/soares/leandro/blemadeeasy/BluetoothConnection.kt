@@ -360,9 +360,9 @@ class BluetoothConnection internal constructor(private val device: BluetoothDevi
 		}
 
 		// Null safe let of the generic attribute profile
-		this.gatt?.let { gatt ->
+		gatt?.let { gatt ->
 			// Searches for the characteristic
-			getCharacteristic(gatt, characteristic)?.let {
+			this.getCharacteristic(gatt, characteristic)?.let {
 				// Tries to write its value
 				val success = it.write(gatt, message)
 				if (success) {

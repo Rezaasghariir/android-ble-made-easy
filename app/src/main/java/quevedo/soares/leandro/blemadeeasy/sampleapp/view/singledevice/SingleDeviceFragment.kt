@@ -159,9 +159,13 @@ class SingleDeviceFragment : Fragment() {
 			// Update variables
 			updateStatus(true, "Sending data...")
 
-			connection?.let {
+			connection?.let {it ->
+				var candidates = it.writableCharacteristics
+				if (candidates.contains(deviceCharacteristic)) candidates = arrayListOf(deviceCharacteristic)
+				val characteristic = candidates.first()
+
 				// According to the 'active' boolean flag, send the information to the bluetooth device
-				val result = it.write(deviceCharacteristic, if (command) "0" else "1")
+				val result = it.write(characteristic, if (command) "A" else "B")
 
 				// If the write operation was successful, toggle it
 				if (result) {

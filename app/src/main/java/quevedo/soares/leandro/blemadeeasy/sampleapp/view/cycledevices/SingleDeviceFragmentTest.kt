@@ -182,7 +182,7 @@ class SingleDeviceFragmentTest : Fragment() {
 
 			connection?.let {
 				// According to the 'active' boolean flag, send the information to the bluetooth device
-				val result = it.write(deviceCharacteristic, if (command) "0" else "1")
+				val result = it.write(deviceCharacteristic, if (command) "A" else "B")
 
 				// If the write operation was successful, toggle it
 				if (result) {
