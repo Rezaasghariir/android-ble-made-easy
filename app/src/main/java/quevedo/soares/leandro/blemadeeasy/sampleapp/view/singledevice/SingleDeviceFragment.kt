@@ -1,12 +1,20 @@
 package quevedo.soares.leandro.blemadeeasy.sampleapp.view.singledevice
 
 import android.annotation.SuppressLint
+import android.location.Location
+import android.location.LocationManager
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.content.Context
+import android.Manifest
+import android.location.LocationListener
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -25,273 +33,371 @@ import java.util.*
  **/
 class SingleDeviceFragment : Fragment() {
 
-	/* Constants */
-	private val deviceMacAddress by lazy { this.navArguments.deviceMacAddress }
-	private val deviceCharacteristic by lazy { this.navArguments.deviceCharacteristic }
+    /* Constants */
+    private val deviceMacAddress by lazy { this.navArguments.deviceMacAddress }
+    private val deviceCharacteristic by lazy { this.navArguments.deviceCharacteristic }
 
-	/* Navigation */
-	private val navController by lazy { findNavController() }
-	private val navArguments by navArgs<SingleDeviceFragmentArgs>()
+    /* Navigation */
+    private val navController by lazy { findNavController() }
+    private val navArguments by navArgs<SingleDeviceFragmentArgs>()
 
-	/* Binding */
-	private lateinit var binding: FragmentSingleDeviceBinding
+    /* Binding */
+    private lateinit var binding: FragmentSingleDeviceBinding
 
-	/* Bluetooth variables */
-	private var ble: BLE? = null
-	private var connection: BluetoothConnection? = null
+    /* Bluetooth variables */
+    private var ble: BLE? = null
+    private var connection: BluetoothConnection? = null
 
-	/* Misc */
-	private var command = false
-	private var isObserving: Boolean = false
+    /* Misc */
+    private var command = false
+    private var isObserving: Boolean = false
 
-	// region Fragment creation related methods
-	override fun onCreate(savedInstanceState: Bundle?) {
-		super.onCreate(savedInstanceState)
+    /* For Speed*/
+    private lateinit var locationManager: LocationManager
+    private var previousLocation: Location? = null
+    private var previousTime = 0L
 
-		// If you intend to use the permission handling, you need to instantiate the library in the onCreate method
-		setupBluetooth()
-	}
+    // region Fragment creation related methods
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-		binding = FragmentSingleDeviceBinding.inflate(inflater, container, false)
-		return binding.root
-	}
+        // If you intend to use the permission handling, you need to instantiate the library in the onCreate method
+        setupBluetooth()
+        setupLocationManager()
+    }
 
-	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-		super.onViewCreated(view, savedInstanceState)
+    private fun setupLocationManager() {
+        locationManager =
+            requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-		setupBinding()
-		updateStatus(false, "Starting...")
-		requestPermissions()
-	}
-	// endregion
+        // Request location permissions (implement permission handling)
+        if (ContextCompat.checkSelfPermission(
+                requireContext(),
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.d("Speed", "setupLocationManager: permission not granted")
+            // Request permission here
+            return
+        }
+        Log.d("Speed", "setupLocationManager: permission granted")
+        locationManager.requestLocationUpdates(
+            LocationManager.GPS_PROVIDER,
+            0,
+            0f, // Minimum distance change (meters)
+            locationListener
+        )
+    }
 
-	// region Fragment destruction related methods
-	override fun onDestroy() {
-		super.onDestroy()
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        binding = FragmentSingleDeviceBinding.inflate(inflater, container, false)
+        return binding.root
+    }
 
-		lifecycleScope.launch {
-			// Closes the connection with the device
-			connection?.close()
-			connection = null
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
 
-			// Destroys the ble instance
-			ble?.stopScan()
-			ble = null
-		}
-	}
-	// endregion
+        setupBinding()
+        updateStatus(false, "Starting...")
+        requestPermissions()
+    }
+    // endregion
 
-	// region Private utility methods
-	private fun showToast(message: String) {
-		Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
-	}
+    // region Fragment destruction related methods
+    override fun onDestroy() {
+        super.onDestroy()
 
-	private fun updateStatus(loading: Boolean, text: String) {
-		binding.fsdCurrentStatus.text = "Current status: $text"
-		binding.fsdClLoader.isVisible = loading
-	}
+        lifecycleScope.launch {
+            // Closes the connection with the device
+            connection?.close()
+            connection = null
 
-	private fun setDeviceConnectionStatus(isConnected: Boolean) {
-		binding.root.post {
-			binding.fsdBtnToggle.isVisible = isConnected
-			binding.fsdBtnRead.isVisible = isConnected
-			binding.fsdBtnDisconnect.isVisible = isConnected
-			binding.fsdBtnObserve.isVisible = isConnected
-			binding.fsdBtnConnect.isVisible = !isConnected
-		}
-	}
+            // Destroys the ble instance
+            ble?.stopScan()
+            ble = null
+        }
+    }
+    // endregion
 
-	@SuppressLint("MissingPermission")
-	private fun requestPermissions() = lifecycleScope.launch {
-		Log.d("MainActivity", "Setting bluetooth manager up...")
+    // region Private utility methods
+    private fun showToast(message: String) {
+        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+    }
 
-		// Checks the bluetooth permissions
-		val permissionsGranted = ble?.verifyPermissions(rationaleRequestCallback = { next ->
-			showToast("We need the bluetooth permissions!")
-			next()
-		})
-		if (permissionsGranted == false) {
-			// Shows UI feedback if the permissions were denied
-			showToast("Permissions denied!")
-			return@launch
-		}
+    private fun updateStatus(loading: Boolean, text: String) {
+        binding.fsdCurrentStatus.text = "Current status: $text"
+        binding.fsdClLoader.isVisible = loading
+    }
 
-		// Checks the bluetooth adapter state
-		if (ble?.verifyBluetoothAdapterState() == false) {
-			// Shows UI feedback if the adapter is turned off
-			showToast("Bluetooth adapter off!")
-			return@launch
-		}
+    private fun setDeviceConnectionStatus(isConnected: Boolean) {
+        binding.root.post {
+            binding.fsdBtnToggle.isVisible = isConnected
+            binding.fsdBtnRead.isVisible = isConnected
+            binding.fsdBtnDisconnect.isVisible = isConnected
+            binding.fsdBtnObserve.isVisible = isConnected
+            binding.currentSpeedId.isVisible = isConnected
+            binding.currentSpeedLable.isVisible = isConnected
+            binding.fsdBtnConnect.isVisible = !isConnected
+        }
+    }
 
-		// Checks the location services state
-		if (ble?.verifyLocationState() == false) {
-			// Shows UI feedback if location services are turned off
-			showToast("Location services off!")
-			return@launch
-		}
-	}
+    @SuppressLint("MissingPermission")
+    private fun requestPermissions() = lifecycleScope.launch {
+        Log.d("MainActivity", "Setting bluetooth manager up...")
 
-	private fun setupBluetooth() {
-		Log.d("MainActivity", "Setting bluetooth manager up...")
+        // Checks the bluetooth permissions
+        val permissionsGranted = ble?.verifyPermissions(rationaleRequestCallback = { next ->
+            showToast("We need the bluetooth permissions!")
+            next()
+        })
+        if (permissionsGranted == false) {
+            // Shows UI feedback if the permissions were denied
+            showToast("Permissions denied!")
+            return@launch
+        }
 
-		// Creates the bluetooth manager instance
-		ble = BLE(this).apply {
-			verbose = true// Optional variable for debugging purposes
-		}
-	}
+        // Checks the bluetooth adapter state
+        if (ble?.verifyBluetoothAdapterState() == false) {
+            // Shows UI feedback if the adapter is turned off
+            showToast("Bluetooth adapter off!")
+            return@launch
+        }
 
-	private fun setupBinding() {
-		binding.apply {
-			// Set the on click listeners
-			fsdBtnRead.setOnClickListener { onButtonReadClick() }
-			fsdBtnToggle.setOnClickListener { onButtonToggleClick() }
-			fsdBtnObserve.setOnClickListener { onButtonObserveClick() }
-			fsdBtnConnect.setOnClickListener { onButtonConnectClick() }
-			fsdBtnDisconnect.setOnClickListener { onButtonDisconnectClick() }
-		}
-	}
-	// endregion
+        // Checks the location services state
+        if (ble?.verifyLocationState() == false) {
+            // Shows UI feedback if location services are turned off
+            showToast("Location services off!")
+            return@launch
+        }
+    }
 
-	// region Event listeners
-	private fun onButtonToggleClick() {
-		lifecycleScope.launch {
-			// Update variables
-			updateStatus(true, "Sending data...")
+    private fun setupBluetooth() {
+        Log.d("MainActivity", "Setting bluetooth manager up...")
 
-			connection?.let {it ->
-				var candidates = it.writableCharacteristics
-				if (candidates.contains(deviceCharacteristic)) candidates = arrayListOf(deviceCharacteristic)
-				val characteristic = candidates.first()
+        // Creates the bluetooth manager instance
+        ble = BLE(this).apply {
+            verbose = true// Optional variable for debugging purposes
+        }
+    }
 
-				// According to the 'active' boolean flag, send the information to the bluetooth device
-				val result = it.write(characteristic, if (command) "A" else "B")
+    private fun setupBinding() {
+        binding.apply {
+            // Set the on click listeners
+            fsdBtnRead.setOnClickListener { onButtonReadClick() }
+            fsdBtnToggle.setOnClickListener { onButtonToggleClick() }
+            fsdBtnObserve.setOnClickListener { onButtonObserveClick() }
+            fsdBtnConnect.setOnClickListener { onButtonConnectClick() }
+            fsdBtnDisconnect.setOnClickListener { onButtonDisconnectClick() }
+        }
+    }
+    // endregion
 
-				// If the write operation was successful, toggle it
-				if (result) {
-					// Update variables
-					updateStatus(false, "Sent!")
-					command = !command
-				} else {
-					// Update variables
-					updateStatus(false, "Information not sent!")
-				}
-			}
-		}
-	}
+    // region Event listeners
+    private fun onButtonToggleClick() {
+        lifecycleScope.launch {
+            // Update variables
+            updateStatus(true, "Sending data...")
 
-	private fun onButtonConnectClick() {
-		lifecycleScope.launch {
-			try {
-				// Update variables
-				updateStatus(true, "Connecting...")
+            connection?.let { it ->
+                var candidates = it.writableCharacteristics
+                if (candidates.contains(deviceCharacteristic)) candidates =
+                    arrayListOf(deviceCharacteristic)
+                val characteristic = candidates.first()
 
-				// Tries to connect with the provided mac address
-				ble?.scanFor(macAddress = deviceMacAddress, timeout = 20000)?.let {
-					onDeviceConnected(it)
-				}
-			} catch (e: ScanTimeoutException) {
-				// Update variables
-				setDeviceConnectionStatus(false)
-				updateStatus(false, "No device found!")
-			} catch (e: Exception) {
-				e.printStackTrace()
-			}
-		}
-	}
+                // According to the 'active' boolean flag, send the information to the bluetooth device
+                val result = it.write(characteristic, if (command) "A" else "B")
 
-	private fun onButtonDisconnectClick() {
-		lifecycleScope.launch {
-			// Update variables
-			updateStatus(true, "Disconnecting...")
+                // If the write operation was successful, toggle it
+                if (result) {
+                    // Update variables
+                    updateStatus(false, "Sent!")
+                    command = !command
+                } else {
+                    // Update variables
+                    updateStatus(false, "Information not sent!")
+                }
+            }
+        }
+    }
 
-			// Closes the connection
-			connection?.close()
-			connection = null
+    private fun onButtonConnectClick() {
+        lifecycleScope.launch {
+            try {
+                // Update variables
+                updateStatus(true, "Connecting...")
 
-			// Update variables
-			updateStatus(false, "Disconnected!")
-			setDeviceConnectionStatus(false)
-		}
-	}
+                // Tries to connect with the provided mac address
+                ble?.scanFor(macAddress = deviceMacAddress, timeout = 20000)?.let {
+                    onDeviceConnected(it)
+                }
+            } catch (e: ScanTimeoutException) {
+                // Update variables
+                setDeviceConnectionStatus(false)
+                updateStatus(false, "No device found!")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
-	private fun onButtonObserveClick() {
-		this.connection?.let {
-			// If the desired characteristic is not available to be observed, pick the first available one
-			// This is not really needed, it is just that this would be nice to have for when using generic BLE devices with this sample app
-			var candidates = it.notifiableCharacteristics
-			if (candidates.isEmpty()) candidates = it.readableCharacteristics
-			if (candidates.contains(deviceCharacteristic)) candidates = arrayListOf(deviceCharacteristic)
-			val characteristic = candidates.first()
+    private fun onButtonDisconnectClick() {
+        lifecycleScope.launch {
+            // Update variables
+            updateStatus(true, "Disconnecting...")
 
-			// Observe
-			if (isObserving) {
-				it.stopObserving(characteristic)
-			} else {
-				it.observeString(characteristic, owner = this.viewLifecycleOwner, interval = 5000L) { new ->
-					showToast("Value changed to $new")
-				}
-			}
+            // Closes the connection
+            connection?.close()
+            connection = null
 
-			// Update the UI
-			this.binding.fsdBtnObserve.setText(if (isObserving) R.string.fragment_single_device_observe_off_btn else R.string.fragment_single_device_observe_on_btn)
-			this.isObserving = !isObserving
-		}
-	}
+            // Update variables
+            updateStatus(false, "Disconnected!")
+            setDeviceConnectionStatus(false)
+        }
+    }
 
-	private fun onButtonReadClick() {
-		lifecycleScope.launch {
-			// Update variables
-			updateStatus(true, "Requesting read...")
+    private fun onButtonObserveClick() {
+        this.connection?.let {
+            // If the desired characteristic is not available to be observed, pick the first available one
+            // This is not really needed, it is just that this would be nice to have for when using generic BLE devices with this sample app
+            var candidates = it.notifiableCharacteristics
+            if (candidates.isEmpty()) candidates = it.readableCharacteristics
+            if (candidates.contains(deviceCharacteristic)) candidates =
+                arrayListOf(deviceCharacteristic)
+            val characteristic = candidates.first()
 
-			// If the desired characteristic is not available to be read, pick the first available one
-			// This is not really needed, it is just that this would be nice to have for when using generic BLE devices with this sample app
-			val characteristic = connection?.readableCharacteristics?.firstOrNull { it == deviceCharacteristic } ?: connection?.readableCharacteristics?.first()
-			if (characteristic.isNullOrEmpty()) {
-				updateStatus(false, "No valid characteristics...")
-				return@launch
-			}
+            // Observe
+            if (isObserving) {
+                it.stopObserving(characteristic)
+            } else {
+                it.observeString(
+                    characteristic,
+                    owner = this.viewLifecycleOwner,
+                    interval = 5000L
+                ) { new ->
+                    showToast("Value changed to $new")
+                }
+            }
 
-			connection?.read(characteristic, Charsets.UTF_8)?.let { response ->
-				if (response.isEmpty()) {
-					updateStatus(false, "Error while reading")
-				} else {
-					showToast("Read value: $response")
-					updateStatus(false, "Read successful")
-				}
-			}
+            // Update the UI
+            this.binding.fsdBtnObserve.setText(if (isObserving) R.string.fragment_single_device_observe_off_btn else R.string.fragment_single_device_observe_on_btn)
+            this.isObserving = !isObserving
+        }
+    }
 
-			// Read remote connection rssi
-			connection?.readRSSI()
-		}
-	}
+    private fun onButtonReadClick() {
+        lifecycleScope.launch {
+            // Update variables
+            updateStatus(true, "Requesting read...")
 
-	private fun onDeviceConnected(connection: BluetoothConnection) {
-		connection.apply {
-			this@SingleDeviceFragment.connection = connection
+            // If the desired characteristic is not available to be read, pick the first available one
+            // This is not really needed, it is just that this would be nice to have for when using generic BLE devices with this sample app
+            val characteristic =
+                connection?.readableCharacteristics?.firstOrNull { it == deviceCharacteristic }
+                    ?: connection?.readableCharacteristics?.first()
+            if (characteristic.isNullOrEmpty()) {
+                updateStatus(false, "No valid characteristics...")
+                return@launch
+            }
 
-			// For larger messages, you can use this method to request a larger MTU
-			// val success = connection?.requestMTU(512)
+            connection?.read(characteristic, Charsets.UTF_8)?.let { response ->
+                if (response.isEmpty()) {
+                    updateStatus(false, "Error while reading")
+                } else {
+                    showToast("Read value: $response")
+                    updateStatus(false, "Read successful")
+                }
+            }
 
-			// Define the on re-connect handler
-			onConnect = {
-				// Update variables
-				setDeviceConnectionStatus(true)
-				updateStatus(false, "Connected!")
-			}
+            // Read remote connection rssi
+            connection?.readRSSI()
+        }
+    }
 
-			// Define the on disconnect handler
-			onDisconnect = {
-				// Update variables
-				setDeviceConnectionStatus(false)
-				updateStatus(false, "Disconnected!")
-			}
+    private fun onDeviceConnected(connection: BluetoothConnection) {
+        connection.apply {
+            this@SingleDeviceFragment.connection = connection
 
-			// Update variables
-			setDeviceConnectionStatus(true)
-			updateStatus(false, "Connected!")
-		}
-	}
-	// endregion
+            // For larger messages, you can use this method to request a larger MTU
+            // val success = connection?.requestMTU(512)
+
+            // Define the on re-connect handler
+            onConnect = {
+                // Update variables
+                setDeviceConnectionStatus(true)
+                updateStatus(false, "Connected!")
+            }
+
+            // Define the on disconnect handler
+            onDisconnect = {
+                // Update variables
+                setDeviceConnectionStatus(false)
+                updateStatus(false, "Disconnected!")
+            }
+
+            // Update variables
+            setDeviceConnectionStatus(true)
+            updateStatus(false, "Connected!")
+        }
+    }
+
+    /* For Speed*/
+    private val locationListener = object : LocationListener {
+
+        override fun onLocationChanged(location: Location) {
+            if (location.hasSpeed()) {
+                val currentSpeed = location.speed * 3.6 // Convert m/s to km/h
+
+                // Update UI with currentSpeed (in km/h)
+                Log.d("Speed", "Current Speed: $currentSpeed km/h")
+                binding.currentSpeedId.text = currentSpeed.toString()
+            } else {
+                // Calculate speed manually
+                if (previousLocation != null && previousTime > 0) {
+                    val distance = location.distanceTo(previousLocation!!)
+                    val elapsedTime =
+                        (System.currentTimeMillis() - previousTime) / 1000.0 // Convert ms to seconds
+
+                    val currentSpeed = (distance / elapsedTime) * 3.6 // Convert m/s to km/h
+                    // Update UI with calculatedSpeed (in km/h)
+                    Log.d("Speed", "Calculated Speed: $currentSpeed km/h")
+                    binding.currentSpeedId.text = currentSpeed.toString()
+                }
+
+                previousLocation = location
+                previousTime = System.currentTimeMillis()
+            }
+            lifecycleScope.launch {
+                // Update variables
+                updateStatus(true, "Sending data...")
+
+                connection?.let { it ->
+                    var candidates = it.writableCharacteristics
+                    if (candidates.contains(deviceCharacteristic)) candidates =
+                        arrayListOf(deviceCharacteristic)
+                    val characteristic = candidates.first()
+                    val textB = binding.currentSpeedId.getText() as String
+                    // According to the 'active' boolean flag, send the information to the bluetooth device
+                    val result = it.write(characteristic, textB)
+
+                    // If the write operation was successful, toggle it
+                    if (result) {
+                        // Update variables
+                        updateStatus(false, "Sent!")
+                        command = !command
+                    } else {
+                        // Update variables
+                        updateStatus(false, "Information not sent!")
+                    }
+                }
+            }
+        }
+
+        // Implement other callback methods (onStatusChanged, onProviderEnabled, onProviderDisabled)
+    }
+    // endregion
 
 }

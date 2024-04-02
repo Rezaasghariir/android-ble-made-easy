@@ -16,6 +16,7 @@
 		app:layout_constraintEnd_toEndOf="parent"
 		app:layout_constraintStart_toStartOf="parent"
 		app:layout_constraintTop_toTopOf="parent"
+		android:layout_marginBottom="50dp"
 		tools:text="Current status: Connecting..." />
 
 	<LinearLayout
@@ -26,6 +27,26 @@
 		app:layout_constraintEnd_toEndOf="parent"
 		app:layout_constraintStart_toStartOf="parent"
 		app:layout_constraintTop_toBottomOf="@id/fsd_current_status">
+
+		<TextView
+			android:id="@+id/currentSpeedLable"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:layout_gravity="center"
+			android:text="@string/fragment_single_device_current_speed_lbl"
+			android:textAlignment="center"
+			android:textSize="16sp"
+			android:textStyle="bold" />
+
+		<TextView
+			android:id="@+id/currentSpeedId"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_gravity="center"
+			android:layout_marginBottom="50dp"
+			android:text="@string/fragment_single_device_current_speed"
+			android:textSize="48sp"
+			android:textStyle="bold" />
 
 		<com.google.android.material.button.MaterialButton
 			android:id="@+id/fsd_btn_toggle"

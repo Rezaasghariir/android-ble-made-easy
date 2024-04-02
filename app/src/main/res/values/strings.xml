@@ -9,6 +9,9 @@
 	<string name="fragment_single_device_disconnect_btn">DISCONNECT</string>
 	<string name="fragment_single_device_connect_btn">CONNECT</string>
 	<string name="fragment_single_device_loading_lbl">Loading</string>
+	<string name="fragment_single_device_current_speed">-  -</string>
+	<string name="fragment_single_device_current_speed_lbl">Current Speed</string>
+
 	<!-- </editor-fold> -->
 
 	<!-- <editor-fold defaultstate="Collapsed" desc="Fragment Scan Devices" -->
